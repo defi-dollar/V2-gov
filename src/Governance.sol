@@ -2,15 +2,12 @@
 pragma solidity 0.8.24;
 
 import {IERC20} from "openzeppelin/contracts/interfaces/IERC20.sol";
+import {IERC20Permit} from "openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {IGovernance, UNREGISTERED_INITIATIVE} from "./interfaces/IGovernance.sol";
 import {IInitiative} from "./interfaces/IInitiative.sol";
-import {ILQTYStaking} from "./interfaces/ILQTYStaking.sol";
-
-import {UserProxy} from "./UserProxy.sol";
-import {UserProxyFactory} from "./UserProxyFactory.sol";
 
 import {add, sub, max} from "./utils/Math.sol";
 import {_requireNoDuplicates, _requireNoNegatives} from "./utils/UniqueArray.sol";
@@ -21,15 +18,13 @@ import {Ownable} from "./utils/Ownable.sol";
 import {_lqtyToVotes} from "./utils/VotingPower.sol";
 
 /// @title Governance: Modular Initiative based Governance
-contract Governance is MultiDelegateCall, UserProxyFactory, ReentrancyGuard, Ownable, IGovernance {
+contract Governance is MultiDelegateCall, ReentrancyGuard, Ownable, IGovernance {
     using SafeERC20 for IERC20;
 
     uint256 constant MIN_GAS_TO_HOOK = 350_000;
 
     /// Replace this to ensure hooks have sufficient gas
 
-    /// @inheritdoc IGovernance
-    ILQTYStaking public immutable stakingV1;
     /// @inheritdoc IGovernance
     IERC20 public immutable lqty;
     /// @inheritdoc IGovernance
@@ -73,17 +68,16 @@ contract Governance is MultiDelegateCall, UserProxyFactory, ReentrancyGuard, Own
     mapping(address => mapping(address => Allocation)) public lqtyAllocatedByUserToInitiative;
     /// @inheritdoc IGovernance
     mapping(address => uint256) public override registeredInitiatives;
+    /// @inheritdoc IGovernance
+    mapping(address => uint256) public staked;
 
     constructor(
         address _lqty,
-        address _lusd,
-        address _stakingV1,
         address _bold,
         Configuration memory _config,
         address _owner,
         address[] memory _initiatives
-    ) UserProxyFactory(_lqty, _lusd, _stakingV1) Ownable(_owner) {
-        stakingV1 = ILQTYStaking(_stakingV1);
+    ) Ownable(_owner) {
         lqty = IERC20(_lqty);
         bold = IERC20(_bold);
         require(_config.minClaim <= _config.minAccrual, "Gov: min-claim-gt-min-accrual");
@@ -136,70 +130,65 @@ contract Governance is MultiDelegateCall, UserProxyFactory, ReentrancyGuard, Own
                                 STAKING
     //////////////////////////////////////////////////////////////*/
 
-    function _increaseUserVoteTrackers(uint256 _lqtyAmount) private returns (UserProxy) {
+    function _increaseUserVoteTrackers(uint256 _lqtyAmount) private {
         require(_lqtyAmount > 0, "Governance: zero-lqty-amount");
-
-        address userProxyAddress = deriveUserProxyAddress(msg.sender);
-
-        if (userProxyAddress.code.length == 0) {
-            deployUserProxy();
-        }
-
-        UserProxy userProxy = UserProxy(payable(userProxyAddress));
 
         // update the vote power trackers
         userStates[msg.sender].unallocatedLQTY += _lqtyAmount;
         userStates[msg.sender].unallocatedOffset += block.timestamp * _lqtyAmount;
-
-        return userProxy;
     }
 
     /// @inheritdoc IGovernance
     function depositLQTY(uint256 _lqtyAmount) external {
-        depositLQTY(_lqtyAmount, false, msg.sender);
-    }
+        _increaseUserVoteTrackers(_lqtyAmount);
 
-    function depositLQTY(uint256 _lqtyAmount, bool _doSendRewards, address _recipient) public nonReentrant {
-        UserProxy userProxy = _increaseUserVoteTrackers(_lqtyAmount);
+        // Transfer LQTY tokens to this contract
+        lqty.safeTransferFrom(msg.sender, address(this), _lqtyAmount);
 
-        (uint256 lusdReceived, uint256 lusdSent, uint256 ethReceived, uint256 ethSent) =
-            userProxy.stake(_lqtyAmount, msg.sender, _doSendRewards, _recipient);
+        // Track deposit
+        staked[msg.sender] += _lqtyAmount;
 
-        emit DepositLQTY(msg.sender, _recipient, _lqtyAmount, lusdReceived, lusdSent, ethReceived, ethSent);
+        emit DepositLQTY(msg.sender, _lqtyAmount);
     }
 
     /// @inheritdoc IGovernance
-    function depositLQTYViaPermit(uint256 _lqtyAmount, PermitParams calldata _permitParams) external {
-        depositLQTYViaPermit(_lqtyAmount, _permitParams, false, msg.sender);
-    }
-
     function depositLQTYViaPermit(
         uint256 _lqtyAmount,
-        PermitParams calldata _permitParams,
-        bool _doSendRewards,
-        address _recipient
+        PermitParams calldata _permitParams
     ) public nonReentrant {
-        UserProxy userProxy = _increaseUserVoteTrackers(_lqtyAmount);
+        _increaseUserVoteTrackers(_lqtyAmount);
 
-        (uint256 lusdReceived, uint256 lusdSent, uint256 ethReceived, uint256 ethSent) =
-            userProxy.stakeViaPermit(_lqtyAmount, msg.sender, _permitParams, _doSendRewards, _recipient);
+        // Apply permit to approve token transfer
+        IERC20Permit(address(lqty)).permit(
+            _permitParams.owner,
+            _permitParams.spender,
+            _permitParams.value,
+            _permitParams.deadline,
+            _permitParams.v,
+            _permitParams.r,
+            _permitParams.s
+        );
 
-        emit DepositLQTY(msg.sender, _recipient, _lqtyAmount, lusdReceived, lusdSent, ethReceived, ethSent);
+        // Transfer LQTY tokens to this contract
+        lqty.safeTransferFrom(msg.sender, address(this), _lqtyAmount);
+
+        // Track deposit
+        staked[msg.sender] += _lqtyAmount;
+
+        emit DepositLQTY(msg.sender, _lqtyAmount);
     }
 
     /// @inheritdoc IGovernance
     function withdrawLQTY(uint256 _lqtyAmount) external {
-        withdrawLQTY(_lqtyAmount, true, msg.sender);
+        withdrawLQTY(_lqtyAmount, msg.sender);
     }
 
-    function withdrawLQTY(uint256 _lqtyAmount, bool _doSendRewards, address _recipient) public nonReentrant {
+    function withdrawLQTY(uint256 _lqtyAmount, address _recipient) public nonReentrant {
         UserState storage userState = userStates[msg.sender];
-
-        UserProxy userProxy = UserProxy(payable(deriveUserProxyAddress(msg.sender)));
-        require(address(userProxy).code.length != 0, "Governance: user-proxy-not-deployed");
 
         // check if user has enough unallocated lqty
         require(_lqtyAmount <= userState.unallocatedLQTY, "Governance: insufficient-unallocated-lqty");
+        require(_lqtyAmount <= staked[msg.sender], "Governance: insufficient-deposits");
 
         // Update the offset tracker
         if (_lqtyAmount < userState.unallocatedLQTY) {
@@ -214,34 +203,13 @@ contract Governance is MultiDelegateCall, UserProxyFactory, ReentrancyGuard, Own
         // Update the user's LQTY tracker
         userState.unallocatedLQTY -= _lqtyAmount;
 
-        (
-            uint256 lqtyReceived,
-            uint256 lqtySent,
-            uint256 lusdReceived,
-            uint256 lusdSent,
-            uint256 ethReceived,
-            uint256 ethSent
-        ) = userProxy.unstake(_lqtyAmount, _doSendRewards, _recipient);
+        // Update deposits
+        staked[msg.sender] -= _lqtyAmount;
 
-        emit WithdrawLQTY(msg.sender, _recipient, lqtyReceived, lqtySent, lusdReceived, lusdSent, ethReceived, ethSent);
-    }
+        // Transfer LQTY back to the user
+        lqty.safeTransfer(_recipient, _lqtyAmount);
 
-    /// @inheritdoc IGovernance
-    function claimFromStakingV1(address _rewardRecipient) external returns (uint256 lusdSent, uint256 ethSent) {
-        address payable userProxyAddress = payable(deriveUserProxyAddress(msg.sender));
-        require(userProxyAddress.code.length != 0, "Governance: user-proxy-not-deployed");
-
-        uint256 lqtyReceived;
-        uint256 lqtySent;
-        uint256 lusdReceived;
-        uint256 ethReceived;
-
-        (lqtyReceived, lqtySent, lusdReceived, lusdSent, ethReceived, ethSent) =
-            UserProxy(userProxyAddress).unstake(0, true, _rewardRecipient);
-
-        emit WithdrawLQTY(
-            msg.sender, _rewardRecipient, lqtyReceived, lqtySent, lusdReceived, lusdSent, ethReceived, ethSent
-        );
+        emit WithdrawLQTY(msg.sender, _lqtyAmount);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -482,7 +450,6 @@ contract Governance is MultiDelegateCall, UserProxyFactory, ReentrancyGuard, Own
         (InitiativeStatus status,,) = getInitiativeState(_initiative);
         require(status == InitiativeStatus.NONEXISTENT, "Governance: initiative-already-registered");
 
-        address userProxyAddress = deriveUserProxyAddress(msg.sender);
         (VoteSnapshot memory snapshot,) = _snapshotVotes();
         UserState memory userState = userStates[msg.sender];
 
@@ -496,7 +463,7 @@ contract Governance is MultiDelegateCall, UserProxyFactory, ReentrancyGuard, Own
         uint256 totalUserOffset = userState.allocatedOffset + userState.unallocatedOffset;
         require(
             // Check against the user's total voting power, so include both allocated and unallocated LQTY
-            lqtyToVotes(stakingV1.stakes(userProxyAddress), epochStart(), totalUserOffset)
+            lqtyToVotes(staked[msg.sender], epochStart(), totalUserOffset)
                 >= upscaledSnapshotVotes * REGISTRATION_THRESHOLD_FACTOR / WAD,
             "Governance: insufficient-lqty"
         );
@@ -833,7 +800,7 @@ contract Governance is MultiDelegateCall, UserProxyFactory, ReentrancyGuard, Own
         }
 
         require(
-            vars.userState.allocatedLQTY <= stakingV1.stakes(deriveUserProxyAddress(msg.sender)),
+            vars.userState.allocatedLQTY <= staked[msg.sender],
             "Governance: insufficient-or-allocated-lqty"
         );
 

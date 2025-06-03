@@ -3,8 +3,6 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "openzeppelin/contracts/interfaces/IERC20.sol";
 
-import {ILQTYStaking} from "./ILQTYStaking.sol";
-
 import {PermitParams} from "../utils/Types.sol";
 
 uint256 constant UNREGISTERED_INITIATIVE = type(uint256).max;
@@ -18,40 +16,18 @@ interface IGovernance {
 
     /// @notice Emitted when a user deposits LQTY
     /// @param user The account depositing LQTY
-    /// @param rewardRecipient The account receiving the LUSD/ETH rewards earned from staking in V1, if claimed
     /// @param lqtyAmount The amount of LQTY being deposited
-    /// @return lusdReceived Amount of LUSD tokens received as a side-effect of staking new LQTY
-    /// @return lusdSent Amount of LUSD tokens sent to `rewardRecipient` (may include previously received LUSD)
-    /// @return ethReceived Amount of ETH received as a side-effect of staking new LQTY
-    /// @return ethSent Amount of ETH sent to `rewardRecipient` (may include previously received ETH)
     event DepositLQTY(
         address indexed user,
-        address rewardRecipient,
-        uint256 lqtyAmount,
-        uint256 lusdReceived,
-        uint256 lusdSent,
-        uint256 ethReceived,
-        uint256 ethSent
+        uint256 lqtyAmount
     );
 
-    /// @notice Emitted when a user withdraws LQTY or claims V1 staking rewards
-    /// @param user The account withdrawing LQTY or claiming V1 staking rewards
-    /// @param recipient The account receiving the LQTY withdrawn, and if claimed, the LUSD/ETH rewards earned from staking in V1
-    /// @return lqtyReceived Amount of LQTY tokens actually withdrawn (may be lower than the `_lqtyAmount` passed to `withdrawLQTY`)
-    /// @return lqtySent Amount of LQTY tokens sent to `recipient` (may include LQTY sent to the user's proxy from sources other than V1 staking)
-    /// @return lusdReceived Amount of LUSD tokens received as a side-effect of staking new LQTY
-    /// @return lusdSent Amount of LUSD tokens sent to `recipient` (may include previously received LUSD)
-    /// @return ethReceived Amount of ETH received as a side-effect of staking new LQTY
-    /// @return ethSent Amount of ETH sent to `recipient` (may include previously received ETH)
+    /// @notice Emitted when a user withdraws LQTY
+    /// @param user The account withdrawing LQTY
+    /// @param lqtyAmount Amount of LQTY tokens withdrawn
     event WithdrawLQTY(
         address indexed user,
-        address recipient,
-        uint256 lqtyReceived,
-        uint256 lqtySent,
-        uint256 lusdReceived,
-        uint256 lusdSent,
-        uint256 ethReceived,
-        uint256 ethSent
+        uint256 lqtyAmount
     );
 
     event SnapshotVotes(uint256 votes, uint256 forEpoch, uint256 boldAccrued);
@@ -85,9 +61,6 @@ interface IGovernance {
 
     function registerInitialInitiatives(address[] memory _initiatives) external;
 
-    /// @notice Address of the LQTY StakingV1 contract
-    /// @return stakingV1 Address of the LQTY StakingV1 contract
-    function stakingV1() external view returns (ILQTYStaking stakingV1);
     /// @notice Address of the LQTY token
     /// @return lqty Address of the LQTY token
     function lqty() external view returns (IERC20 lqty);
@@ -228,6 +201,10 @@ interface IGovernance {
     ///                 If `_initiative` hasn't been registered, returns 0.
     ///                 If `_initiative` has been unregistered, returns `UNREGISTERED_INITIATIVE`.
     function registeredInitiatives(address _initiative) external view returns (uint256 atEpoch);
+    /// @notice Returns the amount of LQTY deposited by a user
+    /// @param _user Address of the user
+    /// @return amount Amount of LQTY deposited
+    function staked(address _user) external view returns (uint256 amount);
 
     /*//////////////////////////////////////////////////////////////
                                 STAKING
@@ -238,46 +215,14 @@ interface IGovernance {
     /// @param _lqtyAmount Amount of LQTY to deposit
     function depositLQTY(uint256 _lqtyAmount) external;
 
-    /// @notice Deposits LQTY
-    /// @dev The caller has to approve their `UserProxy` address to spend the LQTY tokens
-    /// @param _lqtyAmount Amount of LQTY to deposit
-    /// @param _doSendRewards If true, send rewards claimed from LQTY staking
-    /// @param _recipient Address to which the tokens should be sent
-    function depositLQTY(uint256 _lqtyAmount, bool _doSendRewards, address _recipient) external;
-
     /// @notice Deposits LQTY via Permit
     /// @param _lqtyAmount Amount of LQTY to deposit
     /// @param _permitParams Permit parameters
     function depositLQTYViaPermit(uint256 _lqtyAmount, PermitParams calldata _permitParams) external;
 
-    /// @notice Deposits LQTY via Permit
-    /// @param _lqtyAmount Amount of LQTY to deposit
-    /// @param _permitParams Permit parameters
-    /// @param _doSendRewards If true, send rewards claimed from LQTY staking
-    /// @param _recipient Address to which the tokens should be sent
-    function depositLQTYViaPermit(
-        uint256 _lqtyAmount,
-        PermitParams calldata _permitParams,
-        bool _doSendRewards,
-        address _recipient
-    ) external;
-
     /// @notice Withdraws LQTY and claims any accrued LUSD and ETH rewards from StakingV1
     /// @param _lqtyAmount Amount of LQTY to withdraw
     function withdrawLQTY(uint256 _lqtyAmount) external;
-
-    /// @notice Withdraws LQTY and claims any accrued LUSD and ETH rewards from StakingV1
-    /// @param _lqtyAmount Amount of LQTY to withdraw
-    /// @param _doSendRewards If true, send rewards claimed from LQTY staking
-    /// @param _recipient Address to which the tokens should be sent
-    function withdrawLQTY(uint256 _lqtyAmount, bool _doSendRewards, address _recipient) external;
-
-    /// @notice Claims staking rewards from StakingV1 without unstaking
-    /// @dev Note: in the unlikely event that the caller's `UserProxy` holds any LQTY tokens, they will also be sent to `_rewardRecipient`
-    /// @param _rewardRecipient Address that will receive the rewards
-    /// @return lusdSent Amount of LUSD tokens sent to `_rewardRecipient` (may include previously received LUSD)
-    /// @return ethSent Amount of ETH sent to `_rewardRecipient` (may include previously received ETH)
-    function claimFromStakingV1(address _rewardRecipient) external returns (uint256 lusdSent, uint256 ethSent);
 
     /*//////////////////////////////////////////////////////////////
                                  VOTING
