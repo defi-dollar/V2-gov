@@ -15,7 +15,6 @@ import {ILQTYStaking} from "../src/interfaces/ILQTYStaking.sol";
 
 import {BribeInitiative} from "../src/BribeInitiative.sol";
 import {Governance} from "../src/Governance.sol";
-import {UserProxy} from "../src/UserProxy.sol";
 
 import {PermitParams} from "../src/utils/Types.sol";
 
@@ -28,13 +27,11 @@ import "./constants.sol";
 contract GovernanceTester is Governance {
     constructor(
         address _lqty,
-        address _lusd,
-        address _stakingV1,
         address _bold,
         Configuration memory _config,
         address _owner,
         address[] memory _initiatives
-    ) Governance(_lqty, _lusd, _stakingV1, _bold, _config, _owner, _initiatives) {}
+    ) Governance(_lqty, _bold, _config, _owner, _initiatives) {}
 
     function tester_setVotesSnapshot(VoteSnapshot calldata _votesSnapshot) external {
         votesSnapshot = _votesSnapshot;
@@ -101,7 +98,7 @@ abstract contract GovernanceTest is Test {
         });
 
         governance = new GovernanceTester(
-            address(lqty), address(lusd), address(stakingV1), address(lusd), config, address(this), new address[](0)
+            address(lqty), address(lusd), config, address(this), new address[](0)
         );
 
         baseInitiative1 = address(new BribeInitiative(address(governance), address(lusd), address(lqty)));
@@ -135,12 +132,11 @@ abstract contract GovernanceTest is Test {
         uint256 lqtyDeposit = 2e18;
 
         // should not revert if the user doesn't have a UserProxy deployed yet
-        address userProxy = governance.deriveUserProxyAddress(user);
-        lqty.approve(address(userProxy), lqtyDeposit);
+        lqty.approve(address(governance), lqtyDeposit);
         // vm.expectEmit("DepositLQTY", abi.encode(user, 1e18));
-        // deploy and deposit 2 LQTY
+        // deposit 2 LQTY
         governance.depositLQTY(lqtyDeposit);
-        assertEq(UserProxy(payable(userProxy)).staked(), lqtyDeposit);
+        assertEq(governance.staked(user), lqtyDeposit);
         (uint256 unallocatedLQTY, uint256 unallocatedOffset,,) = governance.userStates(user);
         assertEq(unallocatedLQTY, lqtyDeposit);
 
@@ -151,9 +147,9 @@ abstract contract GovernanceTest is Test {
         vm.warp(block.timestamp + timeIncrease);
 
         // Deposit again
-        lqty.approve(address(userProxy), lqtyDeposit);
+        lqty.approve(address(governance), lqtyDeposit);
         governance.depositLQTY(lqtyDeposit);
-        assertEq(UserProxy(payable(userProxy)).staked(), lqtyDeposit * 2);
+        assertEq(governance.staked(user), lqtyDeposit * 2);
         (unallocatedLQTY, unallocatedOffset,,) = governance.userStates(user);
         assertEq(unallocatedLQTY, lqtyDeposit * 2);
 
@@ -165,14 +161,14 @@ abstract contract GovernanceTest is Test {
         vm.warp(block.timestamp + timeIncrease);
 
         vm.startPrank(address(this));
-        vm.expectRevert("Governance: user-proxy-not-deployed");
+        vm.expectRevert("Governance: insufficient-unallocated-lqty");
         governance.withdrawLQTY(lqtyDeposit);
         vm.stopPrank();
 
         vm.startPrank(user);
 
         governance.withdrawLQTY(lqtyDeposit);
-        assertEq(UserProxy(payable(userProxy)).staked(), lqtyDeposit);
+        assertEq(governance.staked(user), lqtyDeposit);
         (unallocatedLQTY, unallocatedOffset,,) = governance.userStates(user);
         assertEq(unallocatedLQTY, lqtyDeposit);
         // Withdrawing half of the LQTY should also halve the offset, i.e. withdraw "proportionally" from all past deposits
@@ -180,7 +176,7 @@ abstract contract GovernanceTest is Test {
 
         // withdraw remaining LQTY
         governance.withdrawLQTY(lqtyDeposit);
-        assertEq(UserProxy(payable(userProxy)).staked(), 0);
+        assertEq(governance.staked(user), 0);
         (unallocatedLQTY, unallocatedOffset,,) = governance.userStates(user);
         assertEq(unallocatedLQTY, 0);
         assertEq(unallocatedOffset, 0, "unallocated offset2");
@@ -198,18 +194,18 @@ abstract contract GovernanceTest is Test {
         vm.stopPrank();
         vm.startPrank(wallet.addr);
 
-        // check address
-        address userProxy = governance.deriveUserProxyAddress(wallet.addr);
-
         PermitParams memory permitParams = PermitParams({
             owner: wallet.addr,
-            spender: address(userProxy),
+            spender: address(governance),
             value: 1e18,
             deadline: block.timestamp + 86400,
             v: 0,
             r: "",
             s: ""
         });
+
+        // Get current nonce for the wallet
+        uint256 nonce = ILQTY(address(lqty)).nonces(wallet.addr);
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(
             wallet.privateKey,
@@ -223,7 +219,7 @@ abstract contract GovernanceTest is Test {
                             permitParams.owner,
                             permitParams.spender,
                             permitParams.value,
-                            0,
+                            nonce,
                             permitParams.deadline
                         )
                     )
@@ -233,51 +229,18 @@ abstract contract GovernanceTest is Test {
 
         permitParams.v = v;
         permitParams.r = r;
-
-        _expectInsufficientAllowance();
-        governance.depositLQTYViaPermit(1e18, permitParams);
-
         permitParams.s = s;
 
-        vm.startPrank(address(this));
-        vm.expectRevert("UserProxy: owner-not-sender");
-        governance.depositLQTYViaPermit(1e18, permitParams);
-        vm.stopPrank();
-
-        vm.startPrank(wallet.addr);
-
+        // Test insufficient balance case
         _expectInsufficientAllowanceAndBalance();
         governance.depositLQTYViaPermit(1e26, permitParams);
 
         // deploy and deposit 1 LQTY
         governance.depositLQTYViaPermit(1e18, permitParams);
-        assertEq(UserProxy(payable(userProxy)).staked(), 1e18);
+        assertEq(governance.staked(wallet.addr), 1e18);
         (uint256 unallocatedLQTY, uint256 unallocatedOffset,,) = governance.userStates(wallet.addr);
         assertEq(unallocatedLQTY, 1e18);
         assertEq(unallocatedOffset, 1e18 * block.timestamp);
-    }
-
-    function test_claimFromStakingV1() public {
-        uint256 timeIncrease = 86400 * 30;
-        vm.warp(block.timestamp + timeIncrease);
-
-        vm.expectRevert("Governance: user-proxy-not-deployed");
-        governance.claimFromStakingV1(address(this));
-
-        vm.startPrank(user);
-
-        // check address
-        address userProxy = governance.deriveUserProxyAddress(user);
-
-        // deploy and deposit 1 LQTY
-        lqty.approve(address(userProxy), 1e18);
-        governance.depositLQTY(1e18);
-        assertEq(UserProxy(payable(userProxy)).staked(), 1e18);
-
-        vm.warp(block.timestamp + timeIncrease);
-
-        governance.claimFromStakingV1(user);
-        assertEq(UserProxy(payable(userProxy)).staked(), 1e18);
     }
 
     // should return the correct epoch for a given block.timestamp
@@ -341,8 +304,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -374,8 +335,6 @@ abstract contract GovernanceTest is Test {
         // check that votingThreshold is 4% of votes of previous epoch
         governance = new GovernanceTester(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -419,8 +378,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -446,8 +403,6 @@ abstract contract GovernanceTest is Test {
 
     function test_registerInitiative() public {
         vm.startPrank(user);
-
-        address userProxy = governance.deployUserProxy();
 
         vm.expectRevert("Governance: registration-not-yet-enabled");
         governance.registerInitiative(baseInitiative3);
@@ -479,7 +434,7 @@ abstract contract GovernanceTest is Test {
         _expectInsufficientAllowance();
         governance.depositLQTY(1e18);
 
-        lqty.approve(address(userProxy), 1e18);
+        lqty.approve(address(governance), 1e18);
         governance.depositLQTY(1e18);
         vm.warp(block.timestamp + EPOCH_DURATION);
 
@@ -513,7 +468,7 @@ abstract contract GovernanceTest is Test {
         });
 
         governance = new GovernanceTester(
-            address(lqty), address(lusd), address(stakingV1), address(lusd), config, address(this), new address[](0)
+            address(lqty), address(lusd), config, address(this), new address[](0)
         );
 
         baseInitiative1 = address(new BribeInitiative(address(governance), address(lusd), address(lqty)));
@@ -531,7 +486,7 @@ abstract contract GovernanceTest is Test {
         {
             uint256 lqtyAmount = 1 ether;
 
-            lqty.approve(governance.deriveUserProxyAddress(user), lqtyAmount);
+            lqty.approve(address(governance), lqtyAmount);
             governance.depositLQTY(lqtyAmount);
 
             address[] memory initiativesToReset; // left empty
@@ -617,9 +572,8 @@ abstract contract GovernanceTest is Test {
     function test_crit_accounting_mismatch() public {
         // User setup
         vm.startPrank(user);
-        address userProxy = governance.deployUserProxy();
 
-        lqty.approve(address(userProxy), 1_000e18);
+        lqty.approve(address(governance), 1_000e18);
         governance.depositLQTY(1_000e18);
 
         vm.warp(block.timestamp + governance.EPOCH_DURATION());
@@ -676,9 +630,8 @@ abstract contract GovernanceTest is Test {
     function test_canAlwaysRemoveAllocation() public {
         // User setup
         vm.startPrank(user);
-        address userProxy = governance.deployUserProxy();
 
-        lqty.approve(address(userProxy), 1_000e18);
+        lqty.approve(address(governance), 1_000e18);
         governance.depositLQTY(1_000e18);
 
         vm.warp(block.timestamp + governance.EPOCH_DURATION());
@@ -745,16 +698,14 @@ abstract contract GovernanceTest is Test {
     // While initiative is unregistered
     function test_allocationRemovalTotalLqtyMathIsSound() public {
         vm.startPrank(user2);
-        address userProxy_2 = governance.deployUserProxy();
 
-        lqty.approve(address(userProxy_2), 1_000e18);
+        lqty.approve(address(governance), 1_000e18);
         governance.depositLQTY(1_000e18);
 
         // User setup
         vm.startPrank(user);
-        address userProxy = governance.deployUserProxy();
 
-        lqty.approve(address(userProxy), 1_000e18);
+        lqty.approve(address(governance), 1_000e18);
         governance.depositLQTY(1_000e18);
 
         vm.warp(block.timestamp + governance.EPOCH_DURATION());
@@ -813,9 +764,8 @@ abstract contract GovernanceTest is Test {
     function test_addRemoveAllocation_accounting() public {
         // User setup
         vm.startPrank(user);
-        address userProxy = governance.deployUserProxy();
 
-        lqty.approve(address(userProxy), 1_000e18);
+        lqty.approve(address(governance), 1_000e18);
         governance.depositLQTY(1_000e18);
 
         vm.warp(block.timestamp + governance.EPOCH_DURATION());
@@ -920,9 +870,8 @@ abstract contract GovernanceTest is Test {
     function test_overflow_crit() public {
         // User setup
         vm.startPrank(user);
-        address userProxy = governance.deployUserProxy();
 
-        lqty.approve(address(userProxy), 1_000e18);
+        lqty.approve(address(governance), 1_000e18);
         governance.depositLQTY(1_000e18);
 
         vm.warp(block.timestamp + governance.EPOCH_DURATION());
@@ -995,9 +944,7 @@ abstract contract GovernanceTest is Test {
     function test_allocateLQTY_single() public {
         vm.startPrank(user);
 
-        address userProxy = governance.deployUserProxy();
-
-        lqty.approve(address(userProxy), 1e18);
+        lqty.approve(address(governance), 1e18);
         governance.depositLQTY(1e18);
 
         (,, uint256 allocatedLQTY, uint256 allocatedOffset) = governance.userStates(user);
@@ -1053,9 +1000,7 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user2);
 
-        address user2Proxy = governance.deployUserProxy();
-
-        lqty.approve(address(user2Proxy), 1e18);
+        lqty.approve(address(governance), 1e18);
         governance.depositLQTY(1e18);
 
         IGovernance.UserState memory user2State;
@@ -1114,9 +1059,7 @@ abstract contract GovernanceTest is Test {
     function test_allocateLQTY_after_cutoff() public {
         vm.startPrank(user);
 
-        address userProxy = governance.deployUserProxy();
-
-        lqty.approve(address(userProxy), 1e18);
+        lqty.approve(address(governance), 1e18);
         governance.depositLQTY(1e18);
 
         (,, uint256 allocatedLQTY, uint256 allocatedOffset) = governance.userStates(user);
@@ -1174,9 +1117,7 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user2);
 
-        address user2Proxy = governance.deployUserProxy();
-
-        lqty.approve(address(user2Proxy), 1e18);
+        lqty.approve(address(governance), 1e18);
         governance.depositLQTY(1e18);
 
         (, uint256 unallocatedOffset,,) = governance.userStates(user2);
@@ -1223,9 +1164,7 @@ abstract contract GovernanceTest is Test {
     function test_allocateLQTY_multiple() public {
         vm.startPrank(user);
 
-        address userProxy = governance.deployUserProxy();
-
-        lqty.approve(address(userProxy), 2e18);
+        lqty.approve(address(governance), 2e18);
         governance.depositLQTY(2e18);
 
         (,, uint256 allocatedLQTY,) = governance.userStates(user);
@@ -1266,10 +1205,8 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user);
 
-        address userProxy = governance.deployUserProxy();
-
         deal(address(lqty), user, _deltaLQTYVotes);
-        lqty.approve(address(userProxy), _deltaLQTYVotes);
+        lqty.approve(address(governance), _deltaLQTYVotes);
         governance.depositLQTY(_deltaLQTYVotes);
 
         address[] memory initiativesToReset;
@@ -1291,10 +1228,8 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user);
 
-        address userProxy = governance.deployUserProxy();
-
         deal(address(lqty), user, _deltaLQTYVetos);
-        lqty.approve(address(userProxy), _deltaLQTYVetos);
+        lqty.approve(address(governance), _deltaLQTYVetos);
         governance.depositLQTY(_deltaLQTYVetos);
 
         address[] memory initiativesToReset;
@@ -1314,10 +1249,7 @@ abstract contract GovernanceTest is Test {
     function test_claimForInitiative() public {
         vm.startPrank(user);
 
-        // deploy
-        address userProxy = governance.deployUserProxy();
-
-        lqty.approve(address(userProxy), 1000e18);
+        lqty.approve(address(governance), 1000e18);
         governance.depositLQTY(1000e18);
 
         vm.warp(block.timestamp + governance.EPOCH_DURATION());
@@ -1404,10 +1336,7 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user);
 
-        // deploy
-        address userProxy = governance.deployUserProxy();
-
-        lqty.approve(address(userProxy), 1000e18);
+        lqty.approve(address(governance), 1000e18);
         governance.depositLQTY(1000e18);
 
         vm.warp(block.timestamp + governance.EPOCH_DURATION());
@@ -1483,9 +1412,9 @@ abstract contract GovernanceTest is Test {
         uint256 lqtyAmount = 1000e18;
         uint256 lqtyBalance = lqty.balanceOf(user);
 
-        lqty.approve(address(governance.deriveUserProxyAddress(user)), lqtyAmount);
+        lqty.approve(address(governance), lqtyAmount);
 
-        bytes[] memory data = new bytes[](8);
+        bytes[] memory data = new bytes[](7);
         address[] memory initiativesToReset;
         address[] memory initiatives = new address[](1);
         initiatives[0] = baseInitiative1;
@@ -1496,32 +1425,31 @@ abstract contract GovernanceTest is Test {
         int256[] memory deltaVoteLQTY_ = new int256[](1);
         deltaVoteLQTY_[0] = 1;
 
-        data[0] = abi.encodeWithSignature("deployUserProxy()");
-        data[1] = abi.encodeWithSignature("depositLQTY(uint256)", lqtyAmount);
-        data[2] = abi.encodeWithSignature(
+        data[0] = abi.encodeWithSignature("depositLQTY(uint256)", lqtyAmount);
+        data[1] = abi.encodeWithSignature(
             "allocateLQTY(address[],address[],int256[],int256[])",
             initiativesToReset,
             initiatives,
             deltaVoteLQTY,
             deltaVetoLQTY
         );
-        data[3] = abi.encodeWithSignature("userStates(address)", user);
-        data[4] = abi.encodeWithSignature("snapshotVotesForInitiative(address)", baseInitiative1);
-        data[5] = abi.encodeWithSignature(
+        data[2] = abi.encodeWithSignature("userStates(address)", user);
+        data[3] = abi.encodeWithSignature("snapshotVotesForInitiative(address)", baseInitiative1);
+        data[4] = abi.encodeWithSignature(
             "allocateLQTY(address[],address[],int256[],int256[])",
             initiatives,
             initiatives,
             deltaVoteLQTY_,
             deltaVetoLQTY
         );
-        data[6] = abi.encodeWithSignature("resetAllocations(address[],bool)", initiatives, true);
-        data[7] = abi.encodeWithSignature("withdrawLQTY(uint256)", lqtyAmount);
+        data[5] = abi.encodeWithSignature("resetAllocations(address[],bool)", initiatives, true);
+        data[6] = abi.encodeWithSignature("withdrawLQTY(uint256)", lqtyAmount);
         bytes[] memory response = governance.multiDelegateCall(data);
 
-        (,, uint256 allocatedLQTY,) = abi.decode(response[3], (uint256, uint256, uint256, uint256));
+        (,, uint256 allocatedLQTY,) = abi.decode(response[2], (uint256, uint256, uint256, uint256));
         assertEq(allocatedLQTY, lqtyAmount);
         (IGovernance.VoteSnapshot memory votes, IGovernance.InitiativeVoteSnapshot memory votesForInitiative) =
-            abi.decode(response[4], (IGovernance.VoteSnapshot, IGovernance.InitiativeVoteSnapshot));
+            abi.decode(response[3], (IGovernance.VoteSnapshot, IGovernance.InitiativeVoteSnapshot));
         assertEq(votes.votes + votesForInitiative.votes, 0);
         assertEq(lqty.balanceOf(user), lqtyBalance);
 
@@ -1620,8 +1548,6 @@ abstract contract GovernanceTest is Test {
         // =========== epoch 1 ==================
         governance = new GovernanceTester(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -1735,8 +1661,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -1815,8 +1739,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -1871,8 +1793,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -1917,8 +1837,6 @@ abstract contract GovernanceTest is Test {
         // =========== epoch 1 ==================
         governance = new GovernanceTester(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -1971,8 +1889,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -2020,8 +1936,6 @@ abstract contract GovernanceTest is Test {
         // =========== epoch 1 ==================
         governance = new GovernanceTester(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -2074,8 +1988,6 @@ abstract contract GovernanceTest is Test {
         // =========== epoch 1 ==================
         governance = new GovernanceTester(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -2145,8 +2057,6 @@ abstract contract GovernanceTest is Test {
         // =========== epoch 1 ==================
         governance = new GovernanceTester(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -2218,8 +2128,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -2279,8 +2187,6 @@ abstract contract GovernanceTest is Test {
         governance = new GovernanceTester(
             address(lqty),
             address(lusd),
-            address(stakingV1),
-            address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
                 registrationThresholdFactor: REGISTRATION_THRESHOLD_FACTOR,
@@ -2326,8 +2232,6 @@ abstract contract GovernanceTest is Test {
         // =========== epoch 1 ==================
         governance = new GovernanceTester(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -2405,7 +2309,6 @@ abstract contract GovernanceTest is Test {
         {
             // Don't wait too long or initiatives might time out
             uint256 maxWaitTime = EPOCH_DURATION * UNREGISTRATION_AFTER_EPOCHS / _stakes.length;
-            address userProxy = governance.deriveUserProxyAddress(user);
             uint256 lqtyBalance = lqty.balanceOf(user);
             uint256 unallocatedLQTY_ = 0;
 
@@ -2414,7 +2317,7 @@ abstract contract GovernanceTest is Test {
                 lqtyBalance -= _stakes[i].lqtyAmount;
                 unallocatedLQTY_ += _stakes[i].lqtyAmount;
 
-                lqty.approve(userProxy, _stakes[i].lqtyAmount);
+                lqty.approve(address(governance), _stakes[i].lqtyAmount);
                 governance.depositLQTY(_stakes[i].lqtyAmount);
 
                 _stakes[i].waitTime = _bound(_stakes[i].waitTime, 1, maxWaitTime);
@@ -2470,8 +2373,7 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user);
         {
-            address userProxy = governance.deriveUserProxyAddress(user);
-            lqty.approve(userProxy, type(uint256).max);
+            lqty.approve(address(governance), type(uint256).max);
             governance.depositLQTY(1);
 
             // By waiting `initialVotingPower` seconds while having 1 wei LQTY staked,
@@ -2545,8 +2447,7 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user);
         {
-            address userProxy = governance.deriveUserProxyAddress(user);
-            lqty.approve(userProxy, type(uint256).max);
+            lqty.approve(address(governance), type(uint256).max);
             governance.depositLQTY(1);
 
             // By waiting `initialVotingPower` seconds while having 1 wei LQTY staked,
@@ -2587,8 +2488,7 @@ abstract contract GovernanceTest is Test {
         // Have another user vote some on the initiative
         vm.startPrank(user2);
         {
-            address userProxy = governance.deriveUserProxyAddress(user2);
-            lqty.approve(userProxy, type(uint256).max);
+            lqty.approve(address(governance), type(uint256).max);
 
             governance.depositLQTY(1 ether);
             votes[0] = 1 ether;
@@ -2600,8 +2500,7 @@ abstract contract GovernanceTest is Test {
 
         vm.startPrank(user);
         {
-            address userProxy = governance.deriveUserProxyAddress(user);
-            lqty.approve(userProxy, type(uint256).max);
+            lqty.approve(address(governance), type(uint256).max);
 
             // Vote 1 LQTY
             governance.depositLQTY(1 ether);
@@ -2623,8 +2522,7 @@ abstract contract GovernanceTest is Test {
 
     function _stakeLQTY(address staker, uint256 amount) internal {
         vm.startPrank(staker);
-        address userProxy = governance.deriveUserProxyAddress(staker);
-        lqty.approve(address(userProxy), amount);
+        lqty.approve(address(governance), amount);
 
         governance.depositLQTY(amount);
         vm.stopPrank();
@@ -2725,29 +2623,5 @@ contract MockedGovernanceTest is GovernanceTest, MockStakingV1Deployer {
 
     function _expectInsufficientAllowanceAndBalance() internal override {
         _expectInsufficientAllowance();
-    }
-}
-
-contract ForkedGovernanceTest is GovernanceTest {
-    function setUp() public override {
-        vm.createSelectFork(vm.rpcUrl("mainnet"), 20430000);
-
-        lqty = ILQTY(MAINNET_LQTY);
-        lusd = ILUSD(MAINNET_LUSD);
-        stakingV1 = ILQTYStaking(MAINNET_LQTY_STAKING);
-
-        super.setUp();
-    }
-
-    function _expectInsufficientAllowance() internal override {
-        vm.expectRevert("ERC20: transfer amount exceeds allowance");
-    }
-
-    function _expectInsufficientBalance() internal override {
-        vm.expectRevert("ERC20: transfer amount exceeds balance");
-    }
-
-    function _expectInsufficientAllowanceAndBalance() internal override {
-        _expectInsufficientBalance();
     }
 }

@@ -60,7 +60,7 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
         });
 
         governance = new Governance(
-            address(lqty), address(lusd), address(stakingV1), address(lusd), config, address(this), new address[](0)
+            address(lqty), address(lusd), config, address(this), new address[](0)
         );
 
         bribeInitiative = new BribeInitiative(address(governance), address(lusd), address(lqty));
@@ -887,7 +887,7 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
             votes[0] = int256(voteAmount);
             votes[1] = int256(voteAmount);
 
-            lqty.approve(governance.deriveUserProxyAddress(user1), 2 * voteAmount);
+            lqty.approve(address(governance), 2 * voteAmount);
             governance.depositLQTY(2 * voteAmount);
             governance.allocateLQTY(initiativesToReset, initiatives, votes, vetos);
         }
@@ -902,7 +902,7 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
             initiatives[0] = address(bribeInitiative);
             votes[0] = int256(voteAmount);
 
-            lqty.approve(governance.deriveUserProxyAddress(user2), voteAmount);
+            lqty.approve(address(governance), voteAmount);
             governance.depositLQTY(voteAmount);
             governance.allocateLQTY(initiativesToReset, initiatives, votes, vetos);
         }
@@ -927,8 +927,7 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
      */
     function _stakeLQTY(address staker, uint256 amount) internal {
         vm.startPrank(staker);
-        address userProxy = governance.deriveUserProxyAddress(staker);
-        lqty.approve(address(userProxy), amount);
+        lqty.approve(address(governance), amount);
         governance.depositLQTY(amount);
         vm.stopPrank();
     }

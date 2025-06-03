@@ -80,8 +80,6 @@ contract InitiativeHooksTest is MockStakingV1Deployer {
 
         governance = new Governance({
             _lqty: address(lqty),
-            _lusd: address(lusd),
-            _stakingV1: address(stakingV1),
             _bold: address(bold),
             _config: config,
             _owner: address(this),
@@ -96,7 +94,7 @@ contract InitiativeHooksTest is MockStakingV1Deployer {
         lqty.mint(voter, 1 ether);
 
         vm.startPrank(voter);
-        lqty.approve(governance.deriveUserProxyAddress(voter), type(uint256).max);
+        lqty.approve(address(governance), type(uint256).max);
         governance.depositLQTY(1 ether);
         vm.stopPrank();
 

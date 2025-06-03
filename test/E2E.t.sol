@@ -54,7 +54,7 @@ contract ForkedE2ETests is Test {
         });
 
         governance = new Governance(
-            address(lqty), address(lusd), stakingV1, address(lusd), config, address(this), new address[](0)
+            address(lqty), address(lusd), config, address(this), new address[](0)
         );
 
         baseInitiative1 = address(new BribeInitiative(address(governance), address(lusd), address(lqty)));
@@ -319,9 +319,7 @@ contract ForkedE2ETests is Test {
     }
 
     function _deposit(uint256 amt) internal {
-        address userProxy = governance.deployUserProxy();
-
-        lqty.approve(address(userProxy), amt);
+        lqty.approve(address(governance), amt);
         governance.depositLQTY(amt);
     }
 

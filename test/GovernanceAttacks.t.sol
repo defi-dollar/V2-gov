@@ -9,7 +9,6 @@ import {ILQTY} from "../src/interfaces/ILQTY.sol";
 import {ILQTYStaking} from "../src/interfaces/ILQTYStaking.sol";
 
 import {Governance} from "../src/Governance.sol";
-import {UserProxy} from "../src/UserProxy.sol";
 
 import {MaliciousInitiative} from "./mocks/MaliciousInitiative.sol";
 import {MockERC20Tester} from "./mocks/MockERC20Tester.sol";
@@ -65,7 +64,7 @@ abstract contract GovernanceAttacksTest is Test {
         });
 
         governance = new Governance(
-            address(lqty), address(lusd), address(stakingV1), address(lusd), config, address(this), initialInitiatives
+            address(lqty), address(lusd), config, address(this), initialInitiatives
         );
     }
 
@@ -73,13 +72,12 @@ abstract contract GovernanceAttacksTest is Test {
     function test_all_revert_attacks_hardcoded() public {
         vm.startPrank(user);
 
-        // should not revert if the user doesn't have a UserProxy deployed yet
-        address userProxy = governance.deriveUserProxyAddress(user);
-        lqty.approve(address(userProxy), 1e18);
+        // should not revert if the user doesn't have direct governance approval
+        lqty.approve(address(governance), 1e18);
 
         // deploy and deposit 1 LQTY
         governance.depositLQTY(1e18);
-        assertEq(UserProxy(payable(userProxy)).staked(), 1e18);
+        assertEq(governance.staked(user), 1e18);
         (,, uint256 allocatedLQTY, uint256 allocatedOffset) = governance.userStates(user);
         assertEq(allocatedLQTY, 0);
         // First deposit should have an unallocated offset of timestamp * deposit
@@ -226,7 +224,7 @@ abstract contract GovernanceAttacksTest is Test {
         deltaVetoLQTY = new int256[](1);
         governance.allocateLQTY(initiativesToReset, initiatives, deltaVoteLQTY, deltaVetoLQTY);
 
-        (Governance.VoteSnapshot memory v, Governance.InitiativeVoteSnapshot memory initData) =
+        (IGovernance.VoteSnapshot memory v, IGovernance.InitiativeVoteSnapshot memory initData) =
             governance.snapshotVotesForInitiative(address(maliciousInitiative2));
 
         // Inactive for 4 epochs

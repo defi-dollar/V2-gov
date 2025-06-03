@@ -59,9 +59,8 @@ abstract contract GovernanceProperties is BeforeAfter {
 
         // allocated is always <= stakes
         for (uint256 i; i < users.length; i++) {
-            // Only sum up user votes
-            address userProxyAddress = governance.deriveUserProxyAddress(users[i]);
-            uint256 stake = MockStakingV1(stakingV1).stakes(userProxyAddress);
+            // Check user's staked amount in governance contract
+            uint256 stake = governance.staked(users[i]);
 
             (,, uint256 user_allocatedLQTY,) = governance.userStates(users[i]);
             lte(user_allocatedLQTY, stake, "User can never allocated more than stake");
@@ -489,7 +488,7 @@ abstract contract GovernanceProperties is BeforeAfter {
 
         // Allocate
         {
-            uint256 stakedAmount = IUserProxy(governance.deriveUserProxyAddress(user)).staked();
+            uint256 stakedAmount = governance.staked(user);
 
             address[] memory initiatives = new address[](1);
             initiatives[0] = targetInitiative;

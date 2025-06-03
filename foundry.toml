@@ -8,7 +8,7 @@ optimizer_runs = 100000
 # Testing
 gas_reports = ["*"]
 verbosity = 3
-chain_id = 99
+chain_id = 1
 block_timestamp = 2592000
 
 [profile.ci.fuzz]

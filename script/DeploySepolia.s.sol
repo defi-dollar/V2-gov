@@ -13,15 +13,12 @@ import {Governance} from "../src/Governance.sol";
 import {CurveV2GaugeRewards} from "../src/CurveV2GaugeRewards.sol";
 
 import {MockERC20Tester} from "../test/mocks/MockERC20Tester.sol";
-import {MockStakingV1} from "../test/mocks/MockStakingV1.sol";
-import {MockStakingV1Deployer} from "../test/mocks/MockStakingV1Deployer.sol";
 import {HookMiner} from "./utils/HookMiner.sol";
 
-contract DeploySepoliaScript is Script, MockStakingV1Deployer {
+contract DeploySepoliaScript is Script {
     // Environment Constants
     MockERC20Tester private lqty;
     MockERC20Tester private bold;
-    MockStakingV1 private stakingV1;
     MockERC20Tester private usdc;
 
     ICurveStableswapFactoryNG private constant curveFactory =
@@ -60,7 +57,7 @@ contract DeploySepoliaScript is Script, MockStakingV1Deployer {
     }
 
     function deployEnvironment() private {
-        (stakingV1, lqty,) = deployMockStakingV1();
+        lqty = new MockERC20Tester("Liquity", "LQTY");
         bold = new MockERC20Tester("Bold", "BOLD");
         usdc = new MockERC20Tester("USD Coin", "USDC");
     }
@@ -68,8 +65,6 @@ contract DeploySepoliaScript is Script, MockStakingV1Deployer {
     function deployGovernance() private {
         governance = new Governance(
             address(lqty),
-            address(bold),
-            address(stakingV1),
             address(bold),
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,

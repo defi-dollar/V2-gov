@@ -65,15 +65,11 @@ contract DeploymentTest is MockStakingV1Deployer {
         vm.prank(deployer);
         governance = new Governance({
             _lqty: address(lqty),
-            _lusd: address(lusd),
-            _stakingV1: address(stakingV1),
             _bold: address(bold),
             _config: config,
             _owner: deployer,
             _initiatives: initiatives
         });
-
-        vm.label(governance.deriveUserProxyAddress(voter), "voterProxy");
     }
 
     function test_AtStart_WeAreInEpoch2() external view {
@@ -132,7 +128,7 @@ contract DeploymentTest is MockStakingV1Deployer {
         vetos.push(0);
 
         vm.startPrank(voter);
-        lqty.approve(governance.deriveUserProxyAddress(voter), lqtyAmount);
+        lqty.approve(address(governance), lqtyAmount);
         governance.depositLQTY(lqtyAmount);
         governance.allocateLQTY(initiativesToReset, initiatives, votes, vetos);
         vm.stopPrank();
@@ -158,7 +154,7 @@ contract DeploymentTest is MockStakingV1Deployer {
         uint256 lqtyAmount = 1 ether;
         lqty.mint(registrant, lqtyAmount);
         vm.startPrank(registrant);
-        lqty.approve(governance.deriveUserProxyAddress(registrant), lqtyAmount);
+        lqty.approve(address(governance), lqtyAmount);
         governance.depositLQTY(lqtyAmount);
         vm.stopPrank();
     }
