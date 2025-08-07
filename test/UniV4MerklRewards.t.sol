@@ -7,6 +7,8 @@ import {console} from "forge-std/console.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/interfaces/IERC20.sol";
 
 import {IGovernance} from "../src/interfaces/IGovernance.sol";
+import {IUserProxy} from "../src/interfaces/IUserProxy.sol";
+import {IUserProxyFactory} from "../src/interfaces/IUserProxyFactory.sol";
 
 import {UniV4MerklRewards, IDistributionCreator} from "../src/UniV4MerklRewards.sol";
 import {Governance} from "../src/Governance.sol";
@@ -238,9 +240,17 @@ contract UniV4MerklE2ETests is Test {
     }
 
     function _deposit(uint256 amt) internal {
-        address userProxy = governance.deployUserProxy();
+        // For the mainnet governance contract, we need to use UserProxy
+        // Deploy UserProxy first to get the actual address
+        address userProxy;
+        try IUserProxyFactory(address(governance)).deployUserProxy() returns (address proxy) {
+            userProxy = proxy;
+        } catch {
+            // UserProxy already exists, derive the address
+            userProxy = IUserProxyFactory(address(governance)).deriveUserProxyAddress(msg.sender);
+        }
 
-        lqty.approve(address(userProxy), amt);
+        lqty.approve(userProxy, amt);
         governance.depositLQTY(amt);
     }
 
