@@ -24,6 +24,8 @@ contract BuyBack is Ownable, IInitiative {
     IERC20 public constant USDFI = IERC20(0xa0ED3359902EfF692e5b8167038133a73D641909);
     IERC20 public constant DEFI = IERC20(0x0883eA1df0E3a5630Be9aEdad4F2C1E2d0182593);
 
+    event BuyBackExecuted(PoolKey key, uint128 amountIn, uint256 amountOut);
+
     constructor(address _router, address _governance, address _permit2) Ownable(msg.sender) {
         router = IUniversalRouter(_router);
         governance = IGovernance(_governance);
@@ -86,7 +88,11 @@ contract BuyBack is Ownable, IInitiative {
         uint256 amount = USDFI.balanceOf(address(this));
         require(amount >= amountIn, "BuyBack: insufficient USDFI balance");
 
-        return _swapExactInputSingle(key, amountIn, minAmountOut);
+        uint256 amountOut = _swapExactInputSingle(key, amountIn, minAmountOut);
+
+        emit BuyBackExecuted(key, amountIn, amountOut);
+
+        return amountOut;
     }
 
     /**
