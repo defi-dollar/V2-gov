@@ -12,7 +12,6 @@ import {BribeInitiative} from "src/BribeInitiative.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {ILQTYStaking} from "src/interfaces/ILQTYStaking.sol";
 import {IInitiative} from "src/interfaces/IInitiative.sol";
-import {IUserProxy} from "src/interfaces/IUserProxy.sol";
 import {PermitParams} from "src/utils/Types.sol";
 import {add} from "src/utils/Math.sol";
 
@@ -23,7 +22,8 @@ abstract contract GovernanceTargets is BaseTargetFunctions, Properties {
         uint256 deltaLQTYVotes,
         uint256 deltaLQTYVetos
     ) public withChecks {
-        uint256 stakedAmount = IUserProxy(governance.deriveUserProxyAddress(user)).staked(); // clamp using the user's staked balance
+        (uint256 unallocatedLQTY,, uint256 allocatedLQTY,) = governance.userStates(user);
+        uint256 stakedAmount = unallocatedLQTY + allocatedLQTY; // clamp using the user's total LQTY balance
 
         address initiative = _getDeployedInitiative(initiativesIndex);
         address[] memory initiativesToReset;
@@ -75,7 +75,8 @@ abstract contract GovernanceTargets is BaseTargetFunctions, Properties {
         uint256 deltaLQTYVotes,
         uint256 deltaLQTYVetos
     ) public withChecks {
-        uint256 stakedAmount = IUserProxy(governance.deriveUserProxyAddress(user2)).staked(); // clamp using the user's staked balance
+        (uint256 unallocatedLQTY,, uint256 allocatedLQTY,) = governance.userStates(user2);
+        uint256 stakedAmount = unallocatedLQTY + allocatedLQTY; // clamp using the user's total LQTY balance
 
         address initiative = _getDeployedInitiative(initiativesIndex);
         address[] memory initiativesToReset;
@@ -122,7 +123,8 @@ abstract contract GovernanceTargets is BaseTargetFunctions, Properties {
     }
 
     function offsetIsRational(uint256 lqtyAmount) public withChecks {
-        uint256 stakedAmount = IUserProxy(governance.deriveUserProxyAddress(user)).staked(); // clamp using the user's staked balance
+        (uint256 unallocatedLQTY,, uint256 allocatedLQTY,) = governance.userStates(user);
+        uint256 stakedAmount = unallocatedLQTY + allocatedLQTY; // clamp using the user's total LQTY balance
 
         // Deposit on zero
         if (stakedAmount == 0) {
@@ -208,27 +210,15 @@ abstract contract GovernanceTargets is BaseTargetFunctions, Properties {
         }
     }
 
-    function governance_claimFromStakingV1(uint8 recipientIndex) public withChecks {
-        address rewardRecipient = _getRandomUser(recipientIndex);
-        governance.claimFromStakingV1(rewardRecipient);
-    }
-
-    function governance_deployUserProxy() public withChecks {
-        governance.deployUserProxy();
-    }
-
     function governance_depositLQTY(uint256 lqtyAmount) public withChecks {
         lqtyAmount = uint256(lqtyAmount % lqty.balanceOf(user));
         governance.depositLQTY(lqtyAmount);
     }
 
     function governance_depositLQTY_2(uint256 lqtyAmount) public withChecks {
-        // Deploy and approve since we don't do it in constructor
+        // In the new governance system, users approve the governance contract directly
         vm.prank(user2);
-        try governance.deployUserProxy() returns (address proxy) {
-            vm.prank(user2);
-            lqty.approve(proxy, type(uint256).max);
-        } catch {}
+        lqty.approve(address(governance), type(uint256).max);
 
         lqtyAmount = uint256(lqtyAmount % lqty.balanceOf(user2));
         vm.prank(user2);
@@ -278,7 +268,8 @@ abstract contract GovernanceTargets is BaseTargetFunctions, Properties {
     }
 
     function governance_withdrawLQTY_shouldRevertWhenClamped(uint256 _lqtyAmount) public withChecks {
-        uint256 stakedAmount = IUserProxy(governance.deriveUserProxyAddress(user)).staked(); // clamp using the user's staked balance
+        (uint256 unallocatedLQTY,, uint256 allocatedLQTY,) = governance.userStates(user);
+        uint256 stakedAmount = unallocatedLQTY + allocatedLQTY; // clamp using the user's total LQTY balance
 
         // Ensure we have 0 votes
         try governance.resetAllocations(deployedInitiatives, true) {}

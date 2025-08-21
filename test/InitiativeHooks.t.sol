@@ -60,7 +60,6 @@ contract InitiativeHooksTest is MockStakingV1Deployer {
 
     MockStakingV1 stakingV1;
     MockERC20Tester lqty;
-    MockERC20Tester lusd;
     MockERC20Tester bold;
     Governance governance;
     MockInitiative initiative;
@@ -73,15 +72,13 @@ contract InitiativeHooksTest is MockStakingV1Deployer {
     function setUp() external {
         vm.warp(START_TIME);
 
-        (stakingV1, lqty, lusd) = deployMockStakingV1();
+        (stakingV1, lqty,) = deployMockStakingV1();
 
         bold = new MockERC20Tester("BOLD Stablecoin", "BOLD");
         vm.label(address(bold), "BOLD");
 
         governance = new Governance({
             _lqty: address(lqty),
-            _lusd: address(lusd),
-            _stakingV1: address(stakingV1),
             _bold: address(bold),
             _config: config,
             _owner: address(this),
@@ -96,7 +93,7 @@ contract InitiativeHooksTest is MockStakingV1Deployer {
         lqty.mint(voter, 1 ether);
 
         vm.startPrank(voter);
-        lqty.approve(governance.deriveUserProxyAddress(voter), type(uint256).max);
+        lqty.approve(address(governance), type(uint256).max);
         governance.depositLQTY(1 ether);
         vm.stopPrank();
 

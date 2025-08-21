@@ -55,9 +55,7 @@ contract ForkedCurveV2GaugeRewardsTest is Test {
             epochVotingCutoff: EPOCH_VOTING_CUTOFF
         });
 
-        governance = new Governance(
-            address(lqty), address(lusd), stakingV1, address(lusd), config, address(this), initialInitiatives
-        );
+        governance = new Governance(address(lqty), address(lusd), config, address(this), initialInitiatives);
 
         address[] memory _coins = new address[](2);
         _coins[0] = address(lusd);

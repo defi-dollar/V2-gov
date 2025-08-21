@@ -6,7 +6,6 @@ import {Governance} from "src/Governance.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {MockStakingV1} from "test/mocks/MockStakingV1.sol";
 import {vm} from "@chimera/Hevm.sol";
-import {IUserProxy} from "src/interfaces/IUserProxy.sol";
 
 abstract contract GovernanceProperties is BeforeAfter {
     uint256 constant TOLLERANCE = 1e19; // NOTE: 1e18 is 1 second due to upscaling
@@ -59,12 +58,10 @@ abstract contract GovernanceProperties is BeforeAfter {
 
         // allocated is always <= stakes
         for (uint256 i; i < users.length; i++) {
-            // Only sum up user votes
-            address userProxyAddress = governance.deriveUserProxyAddress(users[i]);
-            uint256 stake = MockStakingV1(stakingV1).stakes(userProxyAddress);
+            (uint256 unallocatedLQTY,, uint256 user_allocatedLQTY,) = governance.userStates(users[i]);
+            uint256 totalStake = unallocatedLQTY + user_allocatedLQTY;
 
-            (,, uint256 user_allocatedLQTY,) = governance.userStates(users[i]);
-            lte(user_allocatedLQTY, stake, "User can never allocated more than stake");
+            lte(user_allocatedLQTY, totalStake, "User can never allocated more than stake");
         }
     }
 
@@ -489,7 +486,8 @@ abstract contract GovernanceProperties is BeforeAfter {
 
         // Allocate
         {
-            uint256 stakedAmount = IUserProxy(governance.deriveUserProxyAddress(user)).staked();
+            (uint256 unallocatedLQTY,, uint256 allocatedLQTY,) = governance.userStates(user);
+            uint256 stakedAmount = unallocatedLQTY + allocatedLQTY;
 
             address[] memory initiatives = new address[](1);
             initiatives[0] = targetInitiative;

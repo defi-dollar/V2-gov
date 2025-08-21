@@ -22,7 +22,6 @@ abstract contract Setup is BaseSetup, MockStakingV1Deployer {
 
     address internal user = address(this);
     address internal user2 = address(0x537C8f3d3E18dF5517a58B3fB9D9143697996802); // derived using makeAddrAndKey
-    address internal userProxy;
     address[] internal users;
     address[] internal deployedInitiatives;
     uint256 internal user2Pk = 23868421370328131711506074113045611601786642648093516849953535378706721142721; // derived using makeAddrAndKey
@@ -56,8 +55,6 @@ abstract contract Setup is BaseSetup, MockStakingV1Deployer {
 
         governance = new Governance(
             address(lqty),
-            address(lusd),
-            address(stakingV1),
             address(lusd), // bold
             IGovernance.Configuration({
                 registrationFee: REGISTRATION_FEE,
@@ -75,11 +72,6 @@ abstract contract Setup is BaseSetup, MockStakingV1Deployer {
             address(this),
             deployedInitiatives // no initial initiatives passed in because don't have cheatcodes for calculating address where gov will be deployed
         );
-
-        // deploy proxy so user can approve it
-        userProxy = governance.deployUserProxy();
-        lqty.approve(address(userProxy), initialMintAmount);
-        lusd.approve(address(userProxy), initialMintAmount);
 
         // approve governance for user's tokens
         lqty.approve(address(governance), initialMintAmount);

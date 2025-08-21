@@ -19,7 +19,6 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
 
     MockERC20Tester private lqty;
     MockERC20Tester private lusd;
-    MockStakingV1 private stakingV1;
     address private constant user1 = address(0xF977814e90dA44bFA03b6295A0616a897441aceC);
     address private constant user2 = address(0x10C9cff3c4Faa8A60cB8506a7A99411E6A199038);
     address private user3 = makeAddr("user3");
@@ -41,7 +40,7 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
     BribeInitiative private bribeInitiative;
 
     function setUp() public {
-        (stakingV1, lqty, lusd) = deployMockStakingV1();
+        (, lqty, lusd) = deployMockStakingV1();
 
         lqty.mint(lusdHolder, 10_000_000e18);
         lusd.mint(lusdHolder, 10_000_000e18);
@@ -59,9 +58,7 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
             epochVotingCutoff: EPOCH_VOTING_CUTOFF
         });
 
-        governance = new Governance(
-            address(lqty), address(lusd), address(stakingV1), address(lusd), config, address(this), new address[](0)
-        );
+        governance = new Governance(address(lqty), address(lusd), config, address(this), new address[](0));
 
         bribeInitiative = new BribeInitiative(address(governance), address(lusd), address(lqty));
         initialInitiatives.push(address(bribeInitiative));
@@ -134,7 +131,6 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
 
         // total LQTY allocated for this epoch should not change
         (uint256 totalLQTYAllocated2,,,) = bribeInitiative.totalLQTYAllocatedByEpoch(governance.epoch());
-        (uint256 userLQTYAllocated2,,,) = bribeInitiative.lqtyAllocatedByUserAtEpoch(user1, governance.epoch());
         assertEq(totalLQTYAllocated2, 5e18);
         assertEq(userLQTYAllocated1, 5e18);
     }
@@ -750,7 +746,7 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
         epochs[0].prevLQTYAllocationEpoch = governance.epoch() - 2;
         epochs[0].prevTotalLQTYAllocationEpoch = governance.epoch() - 2;
         vm.expectRevert("BribeInitiative: already-claimed");
-        (uint256 boldAmount2, uint256 bribeTokenAmount2) = bribeInitiative.claimBribes(epochs);
+        bribeInitiative.claimBribes(epochs);
         vm.stopPrank();
     }
 
@@ -887,7 +883,8 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
             votes[0] = int256(voteAmount);
             votes[1] = int256(voteAmount);
 
-            lqty.approve(governance.deriveUserProxyAddress(user1), 2 * voteAmount);
+            // Approve and deposit LQTY directly to governance
+            lqty.approve(address(governance), 2 * voteAmount);
             governance.depositLQTY(2 * voteAmount);
             governance.allocateLQTY(initiativesToReset, initiatives, votes, vetos);
         }
@@ -902,7 +899,8 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
             initiatives[0] = address(bribeInitiative);
             votes[0] = int256(voteAmount);
 
-            lqty.approve(governance.deriveUserProxyAddress(user2), voteAmount);
+            // Approve and deposit LQTY directly to governance
+            lqty.approve(address(governance), voteAmount);
             governance.depositLQTY(voteAmount);
             governance.allocateLQTY(initiativesToReset, initiatives, votes, vetos);
         }
@@ -927,8 +925,8 @@ contract BribeInitiativeTest is Test, MockStakingV1Deployer {
      */
     function _stakeLQTY(address staker, uint256 amount) internal {
         vm.startPrank(staker);
-        address userProxy = governance.deriveUserProxyAddress(staker);
-        lqty.approve(address(userProxy), amount);
+        // Approve and deposit LQTY directly to governance
+        lqty.approve(address(governance), amount);
         governance.depositLQTY(amount);
         vm.stopPrank();
     }

@@ -87,8 +87,6 @@ contract BribeInitiativeFireAndForgetTest is MockStakingV1Deployer {
 
         governance = new Governance({
             _lqty: address(lqty),
-            _lusd: address(lusd),
-            _stakingV1: address(stakingV1),
             _bold: address(bold),
             _config: config,
             _owner: address(this),
@@ -102,22 +100,16 @@ contract BribeInitiativeFireAndForgetTest is MockStakingV1Deployer {
         initiatives[0] = address(bribeInitiative);
         governance.registerInitialInitiatives(initiatives);
 
-        address voterProxy = governance.deriveUserProxyAddress(voter);
-        vm.label(voterProxy, "voterProxy");
-
-        address otherProxy = governance.deriveUserProxyAddress(other);
-        vm.label(otherProxy, "otherProxy");
-
         lqty.mint(voter, MAX_VOTE);
         lqty.mint(other, MAX_VOTE);
 
         vm.startPrank(voter);
-        lqty.approve(voterProxy, MAX_VOTE);
+        lqty.approve(address(governance), MAX_VOTE);
         governance.depositLQTY(MAX_VOTE);
         vm.stopPrank();
 
         vm.startPrank(other);
-        lqty.approve(otherProxy, MAX_VOTE);
+        lqty.approve(address(governance), MAX_VOTE);
         governance.depositLQTY(MAX_VOTE);
         vm.stopPrank();
 
